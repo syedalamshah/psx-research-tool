@@ -26,8 +26,16 @@ def retrieve_node(documents, persist_directory="chroma_db"):
         persist_directory=persist_directory,
     )
 
-    batch_size = 10
-    total_batches = max(1, (len(chunks) + batch_size - 1) // batch_size)
+    existing_count = vector_store._collection.count()
+    if existing_count:
+        chunks = chunks[existing_count:]
+        print(
+            f"Resuming from chunk {existing_count}, "
+            f"{len(chunks)} chunks remaining"
+        )
+
+    batch_size = 7
+    total_batches = (len(chunks) + batch_size - 1) // batch_size
 
     for batch_index in range(total_batches):
         start = batch_index * batch_size
@@ -36,37 +44,30 @@ def retrieve_node(documents, persist_directory="chroma_db"):
 
         print(f"Embedded batch {batch_index + 1}/{total_batches}")
 
-        try:
-            vector_store.add_documents(batch)
-        except Exception as exc:
-            error_text = str(exc).upper()
-            is_quota_error = "RESOURCE_EXHAUSTED" in error_text or "429" in error_text
-            if not is_quota_error:
-                raise
-
-            print(
-                f"Batch {batch_index + 1}/{total_batches} hit quota/rate limit. "
-                "Waiting 30s and retrying once..."
-            )
-            time.sleep(5)
-
+        succeeded = False
+        for attempt in range(3):
             try:
                 vector_store.add_documents(batch)
-            except Exception as retry_exc:
-                retry_error_text = str(retry_exc).upper()
-                retry_is_quota_error = (
-                    "RESOURCE_EXHAUSTED" in retry_error_text or "429" in retry_error_text
-                )
-                if retry_is_quota_error:
+                succeeded = True
+                break
+            except Exception as exc:
+                if attempt < 2:
                     print(
-                        f"Batch {batch_index + 1}/{total_batches} failed again after retry; "
-                        "skipping this batch."
+                        f"Batch {batch_index + 1}/{total_batches} failed. "
+                        f"Waiting 15s before retry {attempt + 1}/2..."
                     )
-                    continue
-                raise
+                    time.sleep(15)
+                else:
+                    print(
+                        f"Batch {batch_index + 1}/{total_batches} failed after 2 retries; "
+                        f"skipping it: {exc}"
+                    )
+
+        if not succeeded:
+            continue
 
         if batch_index < total_batches - 1:
-            time.sleep(15)
+            time.sleep(5)
 
     return vector_store
 

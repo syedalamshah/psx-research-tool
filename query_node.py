@@ -10,6 +10,7 @@ from retrieve_node import retrieve_node
 def query_node(vector_store, question):
     documents = vector_store.similarity_search(question, k=3)
     context = "\n\n---\n\n".join(document.page_content for document in documents)
+    print("Retrieved context:\n", context[:2000])
 
     prompt = f"""
 Answer the question using ONLY the provided context.
